@@ -205,10 +205,7 @@ fn dirs_home() -> Option<PathBuf> {
     if let Some(profile) = std::env::var_os("USERPROFILE") {
         return Some(PathBuf::from(profile));
     }
-    match (
-        std::env::var_os("HOMEDRIVE"),
-        std::env::var_os("HOMEPATH"),
-    ) {
+    match (std::env::var_os("HOMEDRIVE"), std::env::var_os("HOMEPATH")) {
         (Some(drive), Some(path)) => {
             let mut p = PathBuf::from(drive);
             p.push(path);
