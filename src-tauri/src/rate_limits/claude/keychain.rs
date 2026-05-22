@@ -10,6 +10,7 @@ use anyhow::{anyhow, Result};
 
 use super::credentials::{now_ms, parse_credentials, sort_credentials, ClaudeOAuthCredentials};
 
+#[cfg(target_os = "macos")]
 pub(super) const CLAUDE_KEYCHAIN_SERVICE: &str = "Claude Code-credentials";
 
 #[cfg(target_os = "macos")]
@@ -107,6 +108,7 @@ fn load_keychain_credentials() -> Result<Vec<ClaudeOAuthCredentials>> {
     Ok(Vec::new())
 }
 
+#[cfg(target_os = "macos")]
 fn keychain_account_candidates() -> Vec<String> {
     // The metadata probe lists every account name actually present in
     // the keychain for our service — when it succeeds we know exactly
@@ -172,11 +174,12 @@ fn keychain_accounts_without_prompt() -> Vec<String> {
         .collect()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn keychain_accounts_without_prompt() -> Vec<String> {
     Vec::new()
 }
 
+#[cfg(target_os = "macos")]
 fn push_unique_account(accounts: &mut Vec<String>, account: String) {
     let trimmed = account.trim();
     if trimmed.is_empty() || accounts.iter().any(|existing| existing == trimmed) {

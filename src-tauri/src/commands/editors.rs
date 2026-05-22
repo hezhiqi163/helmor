@@ -30,6 +30,7 @@ pub struct EditorSpec {
     pub id: &'static str,
     pub name: &'static str,
     /// macOS `CFBundleIdentifier`s. Multiple entries cover stable/preview/CE variants.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub bundle_ids: &'static [&'static str],
     /// Well-known install paths. `$HOME` is expanded at runtime.
     pub known_paths: &'static [&'static str],

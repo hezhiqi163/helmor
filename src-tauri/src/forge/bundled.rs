@@ -164,6 +164,23 @@ mod tests {
         );
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn resolve_finds_binaries_next_to_exe_on_windows() {
+        let root = tempfile::tempdir().unwrap();
+        let exe = root.path().join("Helmor.exe");
+        let vendor = root.path().join("vendor");
+        std::fs::create_dir_all(vendor.join("gh")).unwrap();
+        std::fs::create_dir_all(vendor.join("glab")).unwrap();
+        std::fs::write(vendor.join("gh/gh.exe"), "").unwrap();
+        std::fs::write(vendor.join("glab/glab.exe"), "").unwrap();
+
+        let paths = resolve_for_exe(&exe).unwrap();
+
+        assert_eq!(paths.gh.unwrap(), vendor.join("gh/gh.exe"));
+        assert_eq!(paths.glab.unwrap(), vendor.join("glab/glab.exe"));
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn resolve_returns_none_when_binaries_missing() {

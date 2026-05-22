@@ -55,6 +55,7 @@ pub fn active_api_key_provider(config: &str) -> Option<ApiKeyProvider> {
 ///
 /// Returns an empty vec on parse failure or when no providers declare an
 /// `env_key`.
+#[cfg(unix)]
 pub fn declared_env_keys(config: &str) -> Vec<String> {
     let Ok(value) = toml::from_str::<toml::Value>(config) else {
         return Vec::new();
@@ -143,6 +144,7 @@ base_url = "https://example.openai.azure.com/openai/v1"
         assert_eq!(provider, None);
     }
 
+    #[cfg(unix)]
     #[test]
     fn declared_env_keys_collects_every_provider() {
         let keys = declared_env_keys(
@@ -163,6 +165,7 @@ base_url = "https://example.com"
         assert_eq!(keys, vec!["AZURE_OPENAI_API_KEY", "OPENAI_API_KEY"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn declared_env_keys_deduplicates() {
         let keys = declared_env_keys(
@@ -178,6 +181,7 @@ env_key = "SHARED_KEY"
         assert_eq!(keys, vec!["SHARED_KEY"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn declared_env_keys_handles_empty_config() {
         assert!(declared_env_keys("").is_empty());

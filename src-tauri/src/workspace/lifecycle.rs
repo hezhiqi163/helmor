@@ -948,10 +948,20 @@ fn is_archive_eligible_state(state: WorkspaceState) -> bool {
 }
 
 /// Resolve the interpreter + single-command flag used to run the archive
-/// script. Respects `$SHELL` (falling back to `/bin/sh`) and uses `-c`.
+/// script. Unix respects `$SHELL` (falling back to `/bin/sh`) and uses `-c`.
+/// Windows uses `%ComSpec%` (typically `cmd.exe`) with `/c`.
 fn archive_shell() -> (String, &'static str) {
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
-    (shell, "-c")
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+        (shell, "-c")
+    }
+    #[cfg(windows)]
+    {
+        let shell = std::env::var("ComSpec")
+            .unwrap_or_else(|_| String::from(r"C:\Windows\System32\cmd.exe"));
+        (shell, "/c")
+    }
 }
 
 /// Structured outcome of a single archive-hook invocation. Returned by the

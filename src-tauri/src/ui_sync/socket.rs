@@ -1,10 +1,6 @@
-use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 
-use anyhow::{Context, Result};
-use tauri::{AppHandle, Manager, Runtime};
-
-use super::{events::UiMutationEnvelope, manager::UiSyncManager};
+use anyhow::Result;
 
 const SOCKET_FILENAME: &str = "ui-sync.sock";
 
@@ -12,9 +8,16 @@ pub fn socket_path() -> Result<PathBuf> {
     Ok(crate::data_dir::run_dir()?.join(SOCKET_FILENAME))
 }
 
-pub fn start_listener<R: Runtime>(app: AppHandle<R>) -> Result<()> {
+pub fn start_listener<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<()> {
     #[cfg(unix)]
     {
+        use std::io::{BufRead, BufReader, Write};
+
+        use anyhow::Context;
+        use tauri::Manager;
+
+        use super::{events::UiMutationEnvelope, manager::UiSyncManager};
+
         let socket_path = socket_path()?;
         if socket_path.exists() {
             let _ = std::fs::remove_file(&socket_path);
@@ -138,7 +141,7 @@ pub fn is_listener_running() -> bool {
 mod tests {
     use super::*;
     use crate::data_dir::TEST_ENV_LOCK;
-    use crate::ui_sync::events::UiMutationEvent;
+    use crate::ui_sync::events::{UiMutationEnvelope, UiMutationEvent};
 
     #[test]
     fn socket_path_uses_run_dir() {
