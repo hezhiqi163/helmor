@@ -80,6 +80,8 @@ where
         .collect();
     let resolved = resolve_program(program);
     let mut command = Command::new(&resolved);
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(&mut command);
     command
         .args(&args)
         .stdin(Stdio::null())
@@ -148,9 +150,11 @@ fn kill_process(child_pid: u32) {
 #[cfg(not(unix))]
 fn kill_process(child_pid: u32) {
     let pid = child_pid.to_string();
-    let _ = Command::new("taskkill")
-        .args(["/PID", pid.as_str(), "/T", "/F"])
-        .status();
+    let mut kill = Command::new("taskkill");
+    kill.args(["/PID", pid.as_str(), "/T", "/F"]);
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(&mut kill);
+    let _ = kill.status();
 }
 
 pub(crate) fn command_detail(output: &CommandOutput) -> String {

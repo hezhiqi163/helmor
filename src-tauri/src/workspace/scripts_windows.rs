@@ -191,9 +191,10 @@ fn escalating_kill(pid: u32, child: &Arc<Mutex<Box<dyn portable_pty::Child + Sen
     if let Ok(mut c) = child.lock() {
         let _ = c.kill();
     }
-    let _ = std::process::Command::new("taskkill.exe")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .status();
+    let mut kill = std::process::Command::new("taskkill.exe");
+    kill.args(["/F", "/T", "/PID", &pid.to_string()]);
+    crate::windows_subprocess::hide_console_window(&mut kill);
+    let _ = kill.status();
     let deadline = Instant::now() + PROCESS_TERM_TIMEOUT + PROCESS_KILL_TIMEOUT;
     while Instant::now() < deadline {
         if is_pid_gone(pid) {
@@ -204,12 +205,10 @@ fn escalating_kill(pid: u32, child: &Arc<Mutex<Box<dyn portable_pty::Child + Sen
 }
 
 fn is_pid_gone(pid: u32) -> bool {
-    use std::os::windows::process::CommandExt;
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let output = std::process::Command::new("taskkill.exe")
-        .args(["/PID", &pid.to_string()])
-        .creation_flags(CREATE_NO_WINDOW)
-        .output();
+    let mut probe = std::process::Command::new("taskkill.exe");
+    probe.args(["/PID", &pid.to_string()]);
+    crate::windows_subprocess::hide_console_window(&mut probe);
+    let output = probe.output();
     match output {
         Ok(o) => {
             let stderr = String::from_utf8_lossy(&o.stderr);

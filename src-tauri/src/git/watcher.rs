@@ -823,8 +823,7 @@ mod tests {
     use std::process::Command;
 
     fn git(repo: &Path, args: &[&str]) {
-        let output = Command::new("git")
-            .args(args)
+        let output = crate::git_ops::git_command(args)
             .current_dir(repo)
             .output()
             .unwrap_or_else(|e| panic!("git {args:?} failed: {e}"));

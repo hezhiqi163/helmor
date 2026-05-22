@@ -1027,8 +1027,8 @@ pub(crate) fn run_archive_hook_inner(
     let (shell, shell_flag) = archive_shell();
     tracing::info!(workspace_id, script = %script, shell = %shell, "Running archive hook");
 
-    let status = Command::new(&shell)
-        .arg(shell_flag)
+    let mut cmd = Command::new(&shell);
+    cmd.arg(shell_flag)
         .arg(&script)
         .current_dir(workspace_dir)
         .env("HELMOR_ROOT_PATH", repo_root.display().to_string())
@@ -1037,8 +1037,10 @@ pub(crate) fn run_archive_hook_inner(
         .env(
             "HELMOR_DEFAULT_BRANCH",
             record.default_branch.as_deref().unwrap_or("main"),
-        )
-        .status();
+        );
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(&mut cmd);
+    let status = cmd.status();
 
     match status {
         Ok(s) if s.success() => ArchiveHookOutcome::Success,

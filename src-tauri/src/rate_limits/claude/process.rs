@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 /// (exit code 0). Returns `None` on any failure: spawn error, non-zero
 /// exit, timeout, or read error.
 pub(super) fn run_with_timeout(cmd: &mut Command, timeout: Duration) -> Option<String> {
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(cmd);
     let mut child = cmd
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -48,6 +50,8 @@ pub(super) fn wait_with_timeout(
     cmd: &mut Command,
     timeout: Duration,
 ) -> Option<std::process::ExitStatus> {
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(cmd);
     let mut child = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::null())

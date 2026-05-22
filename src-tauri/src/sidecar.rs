@@ -173,6 +173,9 @@ impl SidecarProcess {
             Command::new(&sidecar_path)
         };
 
+        #[cfg(windows)]
+        crate::windows_subprocess::hide_console_window(&mut cmd);
+
         cmd.stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit());
@@ -308,13 +311,14 @@ impl SidecarProcess {
         #[cfg(windows)]
         {
             let pid = self.pid();
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/T", "/PID"])
+            let mut kill = std::process::Command::new("taskkill");
+            kill.args(["/F", "/T", "/PID"])
                 .arg(pid.to_string())
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+                .stderr(std::process::Stdio::null());
+            crate::windows_subprocess::hide_console_window(&mut kill);
+            let _ = kill.status();
         }
 
         let _ = self.child.kill();
@@ -360,13 +364,14 @@ impl SidecarProcess {
         #[cfg(windows)]
         {
             let pid = self.pid();
-            let _ = std::process::Command::new("taskkill")
-                .args(["/T", "/PID"])
+            let mut kill = std::process::Command::new("taskkill");
+            kill.args(["/T", "/PID"])
                 .arg(pid.to_string())
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
+                .stderr(std::process::Stdio::null());
+            crate::windows_subprocess::hide_console_window(&mut kill);
+            let _ = kill.status();
         }
     }
 }

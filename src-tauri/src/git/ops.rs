@@ -75,16 +75,26 @@ pub const GIT_NETWORK_TIMEOUT: Duration = Duration::from_secs(30);
 /// parked indefinitely on a stalled remote.
 pub const GIT_CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 
-pub fn run_git<I, S>(args: I, current_dir: Option<&Path>) -> Result<String>
+pub(crate) fn git_command<I, S>(args: I) -> Command
 where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
     let mut command = Command::new("git");
-
     for arg in args {
         command.arg(arg.as_ref());
     }
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(&mut command);
+    command
+}
+
+pub fn run_git<I, S>(args: I, current_dir: Option<&Path>) -> Result<String>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    let mut command = git_command(args);
 
     if let Some(current_dir) = current_dir {
         command.current_dir(current_dir);
@@ -106,11 +116,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut command = Command::new("git");
-
-    for arg in args {
-        command.arg(arg.as_ref());
-    }
+    let mut command = git_command(args);
 
     if let Some(current_dir) = current_dir {
         command.current_dir(current_dir);
@@ -139,10 +145,7 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let mut command = Command::new("git");
-    for arg in args {
-        command.arg(arg.as_ref());
-    }
+    let mut command = git_command(args);
     if let Some(current_dir) = current_dir {
         command.current_dir(current_dir);
     }
@@ -224,13 +227,14 @@ where
             // built-in Windows utility — no extra dependency.
             #[cfg(windows)]
             {
-                let _ = std::process::Command::new("taskkill")
-                    .args(["/F", "/T", "/PID"])
+                let mut kill = std::process::Command::new("taskkill");
+                kill.args(["/F", "/T", "/PID"])
                     .arg(child_pid.to_string())
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status();
+                    .stderr(Stdio::null());
+                crate::windows_subprocess::hide_console_window(&mut kill);
+                let _ = kill.status();
             }
             let _ = waiter.join();
             bail!(
@@ -1429,8 +1433,7 @@ pub fn stash_push_include_untracked(workspace_dir: &Path, message: &str) -> Resu
 /// entry intact (git's default), so the caller / agent can retry.
 pub fn stash_pop(workspace_dir: &Path) -> Result<StashPopOutcome> {
     let workspace_dir_arg = workspace_dir.display().to_string();
-    let output = Command::new("git")
-        .args(["-C", workspace_dir_arg.as_str(), "stash", "pop"])
+    let output = git_command(["-C", workspace_dir_arg.as_str(), "stash", "pop"])
         .output()
         .with_context(|| format!("Failed to git stash pop in {}", workspace_dir.display()))?;
     if output.status.success() {

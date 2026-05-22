@@ -16,7 +16,13 @@
  *   bun scripts/prepare-sidecar.mjs      # equivalent, Tauri uses this form
  */
 import { execFileSync, execSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync } from "node:fs";
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	rmSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -86,7 +92,30 @@ function detectTargetTriple() {
 	return output;
 }
 
+/** Remove stale NSIS/MSI artifacts so `tauri build` output is unambiguous. */
+function cleanWindowsBundleArtifacts() {
+	if (process.platform !== "win32") {
+		return;
+	}
+	const bundleRoot = resolve(srcTauriDir, "target", "release", "bundle");
+	for (const subdir of ["nsis", "msi"]) {
+		const dir = resolve(bundleRoot, subdir);
+		if (!existsSync(dir)) {
+			continue;
+		}
+		for (const name of readdirSync(dir)) {
+			const path = resolve(dir, name);
+			if (/\.(exe|msi)$/i.test(name)) {
+				rmSync(path, { force: true });
+				console.log(`[prepare-sidecar] removed stale installer ${path}`);
+			}
+		}
+	}
+}
+
 function main() {
+	cleanWindowsBundleArtifacts();
+
 	// 1. Install sidecar deps (idempotent; fast when lockfile matches).
 	run("bun install --frozen-lockfile", sidecarDir);
 

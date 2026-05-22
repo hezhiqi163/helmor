@@ -23,6 +23,10 @@ pub mod sidecar;
 mod system_limits;
 pub mod ui_sync;
 pub mod updater;
+#[cfg(windows)]
+mod windows_shell;
+#[cfg(windows)]
+mod windows_subprocess;
 pub mod workspace;
 
 #[cfg(test)]
@@ -45,6 +49,17 @@ pub use workspace::workspaces;
 
 use tauri::{Emitter, Manager};
 
+/// Bring the existing main window forward when the user launches a second
+/// copy (installer shortcut, deep link, double-click, etc.).
+#[cfg(desktop)]
+fn focus_main_window(app: &tauri::AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
+    let _ = window.show();
+    let _ = window.set_focus();
+}
+
 /// Initialise the database schema (call once at startup).
 pub fn schema_init(conn: &rusqlite::Connection) {
     db::init_connection(conn, true).expect("Failed to apply PRAGMA init");
@@ -55,7 +70,18 @@ pub fn schema_init(conn: &rusqlite::Connection) {
 pub fn run() {
     system_limits::raise_nofile_soft_limit();
 
-    let builder = tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+
+    // Must register before other plugins (deep-link, updater, …) so duplicate
+    // launches are rejected before they can spawn extra windows on Windows.
+    #[cfg(desktop)]
+    {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            focus_main_window(app);
+        }));
+    }
+
+    let builder = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())

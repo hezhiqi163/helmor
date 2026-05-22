@@ -33,6 +33,7 @@ pub struct EditorSpec {
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub bundle_ids: &'static [&'static str],
     /// Well-known install paths. `$HOME` is expanded at runtime.
+    #[cfg_attr(windows, allow(dead_code))]
     pub known_paths: &'static [&'static str],
 }
 
@@ -279,11 +280,13 @@ fn spec_by_id(id: &str) -> Option<&'static EditorSpec> {
     CATALOG.iter().find(|s| s.id == id)
 }
 
+#[cfg(target_os = "macos")]
 fn expand(path: &str, home: &str) -> String {
     path.replace("$HOME", home)
 }
 
 /// Try the spec's well-known paths. Returns the first one that exists.
+#[cfg(target_os = "macos")]
 fn resolve_via_known_paths(spec: &EditorSpec, home: &str) -> Option<String> {
     for p in spec.known_paths {
         let resolved = expand(p, home);
@@ -358,12 +361,8 @@ fn mdfind_candidate_paths(missing: &[&EditorSpec]) -> std::collections::HashMap<
     result
 }
 
-#[cfg(not(target_os = "macos"))]
-fn mdfind_candidate_paths(_missing: &[&EditorSpec]) -> std::collections::HashMap<String, String> {
-    std::collections::HashMap::new()
-}
-
 /// Resolve a spec's path via its known app-bundle filenames against the mdfind index.
+#[cfg(target_os = "macos")]
 fn resolve_via_mdfind(
     spec: &EditorSpec,
     index: &std::collections::HashMap<String, String>,
@@ -378,6 +377,7 @@ fn resolve_via_mdfind(
     None
 }
 
+#[cfg(target_os = "macos")]
 pub(crate) fn detect_installed_editors_blocking() -> anyhow::Result<Vec<DetectedEditor>> {
     let home = std::env::var("HOME").unwrap_or_default();
 
@@ -424,7 +424,166 @@ pub(crate) fn detect_installed_editors_blocking() -> anyhow::Result<Vec<Detected
     Ok(detected)
 }
 
+#[cfg(windows)]
+const WINDOWS_EDITOR_PATHS: &[(&str, &[&str])] = &[
+    (
+        "cursor",
+        &[
+            r"%LOCALAPPDATA%\Programs\cursor\Cursor.exe",
+            r"%LOCALAPPDATA%\Programs\Cursor\Cursor.exe",
+        ],
+    ),
+    (
+        "vscode",
+        &[
+            r"%LOCALAPPDATA%\Programs\Microsoft VS Code\Code.exe",
+            r"%ProgramFiles%\Microsoft VS Code\Code.exe",
+        ],
+    ),
+    (
+        "vscode-insiders",
+        &[
+            r"%LOCALAPPDATA%\Programs\Microsoft VS Code Insiders\Code - Insiders.exe",
+            r"%ProgramFiles%\Microsoft VS Code Insiders\Code - Insiders.exe",
+        ],
+    ),
+    (
+        "windsurf",
+        &[r"%LOCALAPPDATA%\Programs\Windsurf\Windsurf.exe"],
+    ),
+    (
+        "zed",
+        &[
+            r"%LOCALAPPDATA%\Programs\Zed\zed.exe",
+            r"%LOCALAPPDATA%\Programs\Zed\Zed.exe",
+        ],
+    ),
+    (
+        "sublime",
+        &[
+            r"%ProgramFiles%\Sublime Text\sublime_text.exe",
+            r"%ProgramFiles%\Sublime Text 3\sublime_text.exe",
+        ],
+    ),
+    (
+        "intellij",
+        &[
+            r"%ProgramFiles%\JetBrains\IntelliJ IDEA\bin\idea64.exe",
+            r"%LOCALAPPDATA%\Programs\IntelliJ IDEA\bin\idea64.exe",
+        ],
+    ),
+    (
+        "pycharm",
+        &[
+            r"%ProgramFiles%\JetBrains\PyCharm\bin\pycharm64.exe",
+            r"%LOCALAPPDATA%\Programs\PyCharm\bin\pycharm64.exe",
+        ],
+    ),
+    (
+        "webstorm",
+        &[
+            r"%ProgramFiles%\JetBrains\WebStorm\bin\webstorm64.exe",
+            r"%LOCALAPPDATA%\Programs\WebStorm\bin\webstorm64.exe",
+        ],
+    ),
+    (
+        "goland",
+        &[
+            r"%ProgramFiles%\JetBrains\GoLand\bin\goland64.exe",
+            r"%LOCALAPPDATA%\Programs\GoLand\bin\goland64.exe",
+        ],
+    ),
+    (
+        "android-studio",
+        &[
+            r"%ProgramFiles%\Android\Android Studio\bin\studio64.exe",
+            r"%LOCALAPPDATA%\Programs\Android Studio\bin\studio64.exe",
+        ],
+    ),
+    ("warp", &[r"%LOCALAPPDATA%\Programs\Warp\warp.exe"]),
+    (
+        "wezterm",
+        &[
+            r"%ProgramFiles%\WezTerm\wezterm.exe",
+            r"%LOCALAPPDATA%\Programs\WezTerm\wezterm.exe",
+        ],
+    ),
+    (
+        "alacritty",
+        &[
+            r"%ProgramFiles%\Alacritty\alacritty.exe",
+            r"%LOCALAPPDATA%\Programs\Alacritty\alacritty.exe",
+        ],
+    ),
+    ("hyper", &[r"%LOCALAPPDATA%\Programs\Hyper\Hyper.exe"]),
+    (
+        "gitkraken",
+        &[
+            r"%LOCALAPPDATA%\GitKraken\GitKraken.exe",
+            r"%LOCALAPPDATA%\Programs\GitKraken\GitKraken.exe",
+        ],
+    ),
+    (
+        "sourcetree",
+        &[
+            r"%LOCALAPPDATA%\SourceTree\SourceTree.exe",
+            r"%ProgramFiles%\Sourcetree\SourceTree.exe",
+        ],
+    ),
+    ("terminal", &[]),
+];
+
+#[cfg(windows)]
+fn resolve_via_windows_paths(editor_id: &str) -> Option<String> {
+    if editor_id == "terminal" {
+        return crate::windows_shell::resolve_windows_terminal()
+            .ok()
+            .map(|p| p.display().to_string());
+    }
+
+    let paths = WINDOWS_EDITOR_PATHS
+        .iter()
+        .find(|(id, _)| *id == editor_id)
+        .map(|(_, paths)| *paths)?;
+
+    for template in paths {
+        let resolved = crate::windows_shell::expand_path_template(template);
+        if std::path::Path::new(&resolved).is_file() {
+            return Some(resolved);
+        }
+    }
+
+    crate::windows_shell::resolve_jetbrains_toolbox(editor_id)
+}
+
+#[cfg(windows)]
+pub(crate) fn detect_installed_editors_blocking() -> anyhow::Result<Vec<DetectedEditor>> {
+    let mut detected: Vec<DetectedEditor> = Vec::new();
+    for spec in CATALOG {
+        if let Some(path) = resolve_via_windows_paths(spec.id) {
+            detected.push(DetectedEditor {
+                id: spec.id.to_string(),
+                name: spec.name.to_string(),
+                path,
+            });
+        }
+    }
+    detected.sort_by_key(|d| {
+        CATALOG
+            .iter()
+            .position(|s| s.id == d.id)
+            .unwrap_or(usize::MAX)
+    });
+    Ok(detected)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+pub(crate) fn detect_installed_editors_blocking() -> anyhow::Result<Vec<DetectedEditor>> {
+    Ok(Vec::new())
+}
+
 /// Resolve a single spec's path on demand (used by the launcher).
+#[cfg(target_os = "macos")]
 fn resolve_single(spec: &EditorSpec) -> Option<String> {
     let home = std::env::var("HOME").unwrap_or_default();
     if let Some(p) = resolve_via_known_paths(spec, &home) {
@@ -432,6 +591,16 @@ fn resolve_single(spec: &EditorSpec) -> Option<String> {
     }
     let index = mdfind_candidate_paths(&[spec]);
     resolve_via_mdfind(spec, &index)
+}
+
+#[cfg(windows)]
+fn resolve_single(spec: &EditorSpec) -> Option<String> {
+    resolve_via_windows_paths(spec.id)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+fn resolve_single(_spec: &EditorSpec) -> Option<String> {
+    None
 }
 
 #[cfg(target_os = "macos")]
@@ -449,13 +618,56 @@ fn launch_with_open(
     cmd.spawn().map(|_| ()).context("open command failed")
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn launch_with_open(
+    app_path: Option<&str>,
+    editor_id: &str,
+    target: &std::path::Path,
+) -> anyhow::Result<()> {
+    match app_path {
+        Some(exe) => launch_windows_editor(exe, editor_id, target),
+        None => crate::windows_shell::explorer_open_dir(target),
+    }
+}
+
+#[cfg(windows)]
+fn launch_windows_editor(
+    exe: &str,
+    editor_id: &str,
+    target: &std::path::Path,
+) -> anyhow::Result<()> {
+    let target_arg = target.as_os_str();
+    let mut cmd = std::process::Command::new(exe);
+    crate::windows_subprocess::hide_console_window(&mut cmd);
+    match editor_id {
+        "terminal" => {
+            cmd.arg("-d").arg(target_arg);
+        }
+        "wezterm" => {
+            cmd.args(["start", "--cwd"]).arg(target_arg);
+        }
+        "alacritty" => {
+            cmd.args(["--working-directory"]).arg(target_arg);
+        }
+        "warp" | "hyper" => {
+            // These GUIs do not take a workspace path on the CLI; open the app.
+        }
+        _ => {
+            cmd.arg(target_arg);
+        }
+    }
+    cmd.spawn()
+        .map(|_| ())
+        .with_context(|| format!("failed to launch {exe}"))
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn launch_with_open(
     _app_path: Option<&str>,
-    _app_name: &str,
-    _dir: &std::path::Path,
+    _editor_id: &str,
+    _target: &std::path::Path,
 ) -> anyhow::Result<()> {
-    anyhow::bail!("Opening third-party editors is only supported on macOS")
+    anyhow::bail!("Opening third-party editors is only supported on macOS and Windows")
 }
 
 #[cfg(target_os = "macos")]
@@ -467,9 +679,14 @@ fn reveal_in_finder(dir: &std::path::Path) -> anyhow::Result<()> {
         .context("open command failed")
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn reveal_in_finder(dir: &std::path::Path) -> anyhow::Result<()> {
+    crate::windows_shell::explorer_open_dir(dir)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn reveal_in_finder(_dir: &std::path::Path) -> anyhow::Result<()> {
-    anyhow::bail!("Opening Finder is only supported on macOS")
+    anyhow::bail!("Opening Finder is only supported on macOS and Windows")
 }
 
 #[tauri::command]
@@ -497,8 +714,13 @@ pub async fn open_workspace_in_editor(workspace_id: String, editor: String) -> C
         // Prefer the absolute app path (bypasses Launch Services name resolution,
         // which trips on renamed bundles and ambiguous names).
         let resolved = resolve_single(spec);
+        #[cfg(target_os = "macos")]
         launch_with_open(resolved.as_deref(), spec.name, &workspace_dir)
-            .with_context(|| format!("Failed to open {}", spec.name))
+            .with_context(|| format!("Failed to open {}", spec.name))?;
+        #[cfg(windows)]
+        launch_with_open(resolved.as_deref(), spec.id, &workspace_dir)
+            .with_context(|| format!("Failed to open {}", spec.name))?;
+        Ok(())
     })
     .await
 }
@@ -515,8 +737,13 @@ pub async fn open_file_in_editor(path: String, editor: String) -> CmdResult<()> 
         }
 
         let resolved = resolve_single(spec);
+        #[cfg(target_os = "macos")]
         launch_with_open(resolved.as_deref(), spec.name, std::path::Path::new(&path))
-            .with_context(|| format!("Failed to open {}", spec.name))
+            .with_context(|| format!("Failed to open {}", spec.name))?;
+        #[cfg(windows)]
+        launch_with_open(resolved.as_deref(), spec.id, std::path::Path::new(&path))
+            .with_context(|| format!("Failed to open {}", spec.name))?;
+        Ok(())
     })
     .await
 }
@@ -535,7 +762,7 @@ pub async fn open_workspace_in_finder(workspace_id: String) -> CmdResult<()> {
             ));
         }
 
-        reveal_in_finder(&workspace_dir).context("Failed to open Finder")
+        reveal_in_finder(&workspace_dir).context("Failed to open file explorer")
     })
     .await
 }

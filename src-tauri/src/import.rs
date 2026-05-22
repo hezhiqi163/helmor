@@ -643,16 +643,14 @@ fn resolve_source_branch(
         let conductor_ws = root.join("workspaces").join(repo_name).join(directory_name);
 
         if conductor_ws.is_dir() {
-            if let Ok(output) = std::process::Command::new("git")
-                .args([
-                    "-C",
-                    &conductor_ws.display().to_string(),
-                    "rev-parse",
-                    "--abbrev-ref",
-                    "HEAD",
-                ])
-                .output()
-            {
+            let mut git = crate::git_ops::git_command([
+                "-C",
+                &conductor_ws.display().to_string(),
+                "rev-parse",
+                "--abbrev-ref",
+                "HEAD",
+            ]);
+            if let Ok(output) = git.output() {
                 let actual = String::from_utf8_lossy(&output.stdout).trim().to_string();
                 if !actual.is_empty()
                     && actual != "HEAD"

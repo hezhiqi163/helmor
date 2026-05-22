@@ -72,8 +72,28 @@ pub struct HelmorSkillsStatus {
 }
 
 /// Where Helmor installs its managed CLI entrypoint on macOS.
+#[cfg(target_os = "macos")]
 fn cli_install_target() -> std::path::PathBuf {
     std::path::PathBuf::from(format!("/usr/local/bin/{}", installed_cli_name()))
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+fn cli_install_target() -> std::path::PathBuf {
+    std::path::PathBuf::from(format!("/usr/local/bin/{}", installed_cli_name()))
+}
+
+/// User-local install dir on Windows (`helmor.exe` / `helmor-dev.exe`).
+#[cfg(windows)]
+fn cli_install_target() -> std::path::PathBuf {
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            std::path::PathBuf::from(std::env::var("USERPROFILE").unwrap_or_else(|_| ".".into()))
+        });
+    local
+        .join("Helmor")
+        .join("bin")
+        .join(format!("{}.exe", installed_cli_name()))
 }
 
 fn installed_cli_name() -> &'static str {
@@ -93,14 +113,42 @@ fn bundled_cli_binary(app_exe: &std::path::Path) -> anyhow::Result<std::path::Pa
     let target_dir = app_exe
         .parent()
         .context("Cannot determine app binary directory")?;
+    #[cfg(windows)]
+    {
+        let with_exe = target_dir.join(format!("{}.exe", cli_source_binary_name()));
+        if with_exe.is_file() {
+            return Ok(with_exe);
+        }
+    }
     Ok(target_dir.join(cli_source_binary_name()))
 }
 
+#[cfg(target_os = "macos")]
 fn cli_install_remediation(cli_binary: &std::path::Path, install_path: &std::path::Path) -> String {
     format!(
         "sudo ln -sfn {} {}",
         shell_quote(cli_binary),
         shell_quote(install_path),
+    )
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
+#[allow(dead_code)]
+fn cli_install_remediation(cli_binary: &std::path::Path, install_path: &std::path::Path) -> String {
+    format!("Install the CLI manually from {}", cli_binary.display())
+}
+
+#[cfg(windows)]
+fn cli_install_remediation(cli_binary: &std::path::Path, install_path: &std::path::Path) -> String {
+    let bin_dir = install_path
+        .parent()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| "%LOCALAPPDATA%\\Helmor\\bin".to_string());
+    format!(
+        "copy /Y \"{}\" \"{}\" && add \"{}\" to your user PATH",
+        cli_binary.display(),
+        install_path.display(),
+        bin_dir,
     )
 }
 
@@ -112,6 +160,7 @@ fn shell_quote_arg(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
 
+#[cfg(target_os = "macos")]
 fn classify_cli_install(
     install_path: &std::path::Path,
     bundled_cli: &std::path::Path,
@@ -150,6 +199,29 @@ fn classify_cli_install(
     }
 }
 
+#[cfg(windows)]
+fn classify_cli_install(
+    install_path: &std::path::Path,
+    bundled_cli: &std::path::Path,
+) -> CliInstallState {
+    if !install_path.is_file() {
+        return CliInstallState::Missing;
+    }
+    if windows_cli_files_match(install_path, bundled_cli) {
+        CliInstallState::Managed
+    } else {
+        CliInstallState::Stale
+    }
+}
+
+#[cfg(windows)]
+fn windows_cli_files_match(install_path: &std::path::Path, bundled_cli: &std::path::Path) -> bool {
+    match (std::fs::read(install_path), std::fs::read(bundled_cli)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
 fn cli_status_for_paths(
     install_path: &std::path::Path,
     bundled_cli: &std::path::Path,
@@ -185,30 +257,85 @@ fn install_cli_symlink(
         }
     }
 
+    install_cli_platform(bundled_cli, install_path)
+}
+
+#[cfg(windows)]
+fn install_cli_platform(
+    bundled_cli: &std::path::Path,
+    install_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    try_install_cli_copy_windows(bundled_cli, install_path)
+}
+
+#[cfg(target_os = "macos")]
+fn install_cli_platform(
+    bundled_cli: &std::path::Path,
+    install_path: &std::path::Path,
+) -> anyhow::Result<()> {
     match try_install_symlink_unprivileged(bundled_cli, install_path) {
-        Ok(()) => return Ok(()),
+        Ok(()) => Ok(()),
         Err(error) if is_permission_denied(&error) => {
             tracing::info!(
                 target: "helmor_lib::commands::system_commands",
                 "Direct CLI install hit permission denied; requesting authorization."
             );
+            install_cli_symlink_elevated(bundled_cli, install_path)
         }
-        Err(error) => return Err(error),
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        install_cli_symlink_elevated(bundled_cli, install_path)
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        anyhow::bail!(
-            "Installing the CLI requires elevated privileges. Run:\n  {}",
-            cli_install_remediation(bundled_cli, install_path)
-        )
+        Err(error) => Err(error),
     }
 }
 
+#[cfg(all(not(windows), not(target_os = "macos")))]
+fn install_cli_platform(
+    _bundled_cli: &std::path::Path,
+    _install_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    anyhow::bail!("CLI install is only supported on macOS and Windows")
+}
+
+#[cfg(windows)]
+fn try_install_cli_copy_windows(
+    bundled_cli: &std::path::Path,
+    install_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    if let Some(parent) = install_path.parent() {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("Failed to prepare install directory {}", parent.display()))?;
+    }
+
+    if install_path.exists() {
+        std::fs::remove_file(install_path).with_context(|| {
+            format!(
+                "Failed to replace existing CLI install at {}",
+                install_path.display()
+            )
+        })?;
+    }
+
+    std::fs::copy(bundled_cli, install_path).with_context(|| {
+        format!(
+            "Failed to copy CLI from {} to {}. Manual fix:\n  {}",
+            bundled_cli.display(),
+            install_path.display(),
+            cli_install_remediation(bundled_cli, install_path)
+        )
+    })?;
+
+    if let Some(bin_dir) = install_path.parent() {
+        if let Err(error) = crate::windows_shell::ensure_user_path_contains(bin_dir) {
+            tracing::warn!(
+                error = %format!("{error:#}"),
+                "CLI copied but user PATH was not updated; add {:?} to PATH manually",
+                bin_dir
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(unix)]
 fn try_install_symlink_unprivileged(
     bundled_cli: &std::path::Path,
     install_path: &std::path::Path,
@@ -245,13 +372,10 @@ fn try_install_symlink_unprivileged(
         Ok(())
     }
 
-    #[cfg(not(unix))]
-    {
-        let _ = bundled_cli;
-        anyhow::bail!("CLI installation via symlink is only supported on Unix.")
-    }
+    Ok(())
 }
 
+#[cfg(target_os = "macos")]
 fn is_permission_denied(error: &anyhow::Error) -> bool {
     error.chain().any(|err| {
         err.downcast_ref::<std::io::Error>()
@@ -544,8 +668,11 @@ pub async fn install_helmor_skills() -> CmdResult<HelmorSkillsStatus> {
             );
         }
 
-        let output = Command::new("npx")
-            .args(helmor_skills_install_args(&agents))
+        let mut npx = Command::new("npx");
+        npx.args(helmor_skills_install_args(&agents));
+        #[cfg(windows)]
+        crate::windows_subprocess::hide_console_window(&mut npx);
+        let output = npx
             .output()
             .with_context(|| format!("Failed to start skills installer. Try:\n  {command}"))?;
 
@@ -707,10 +834,11 @@ fn resolve_agent_binary(provider: &str) -> PathBuf {
 }
 
 fn claude_login_ready() -> bool {
-    match std::process::Command::new(resolve_agent_binary("claude"))
-        .args(["auth", "status"])
-        .output()
-    {
+    let mut cmd = std::process::Command::new(resolve_agent_binary("claude"));
+    cmd.args(["auth", "status"]);
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(&mut cmd);
+    match cmd.output() {
         Ok(output) if output.status.success() => parse_claude_login_status(&output.stdout),
         Ok(output) => {
             // Claude exits non-zero when the user isn't authenticated —
@@ -761,10 +889,11 @@ fn codex_auth_status() -> CodexAuthStatus {
 }
 
 fn codex_login_ready() -> bool {
-    match std::process::Command::new(resolve_agent_binary("codex"))
-        .args(["login", "status"])
-        .output()
-    {
+    let mut cmd = std::process::Command::new(resolve_agent_binary("codex"));
+    cmd.args(["login", "status"]);
+    #[cfg(windows)]
+    crate::windows_subprocess::hide_console_window(&mut cmd);
+    match cmd.output() {
         Ok(output) if output.status.success() => {
             let stdout = String::from_utf8_lossy(&output.stdout);
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -835,6 +964,36 @@ fn agent_login_script_type(provider: &str, instance_id: &str) -> String {
 
 const AGENT_LOGIN_REPO_ID: &str = "__helmor_onboarding__";
 
+fn agent_login_working_dir() -> String {
+    #[cfg(windows)]
+    {
+        if let Ok(profile) = std::env::var("USERPROFILE") {
+            if !profile.trim().is_empty() {
+                return profile;
+            }
+        }
+    }
+
+    std::env::var("HOME")
+        .ok()
+        .filter(|home| !home.trim().is_empty())
+        .or_else(|| {
+            std::env::current_dir()
+                .ok()
+                .map(|path| path.display().to_string())
+        })
+        .unwrap_or_else(|| {
+            #[cfg(windows)]
+            {
+                "C:\\".to_string()
+            }
+            #[cfg(not(windows))]
+            {
+                "/".to_string()
+            }
+        })
+}
+
 #[tauri::command]
 pub async fn spawn_agent_login_terminal(
     app: tauri::AppHandle,
@@ -862,15 +1021,7 @@ pub async fn spawn_agent_login_terminal(
         let _ = window.set_focus();
     }
 
-    let working_dir = std::env::var("HOME")
-        .ok()
-        .filter(|home| !home.trim().is_empty())
-        .or_else(|| {
-            std::env::current_dir()
-                .ok()
-                .map(|path| path.display().to_string())
-        })
-        .unwrap_or_else(|| "/".to_string());
+    let working_dir = agent_login_working_dir();
     let context = ScriptContext {
         root_path: working_dir.clone(),
         workspace_path: None,
@@ -993,10 +1144,19 @@ fn open_agent_login_terminal_impl(provider: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn open_agent_login_terminal_impl(provider: &str) -> anyhow::Result<()> {
+    let command = agent_login_command(provider)?;
+    crate::windows_shell::open_login_console(&command)
+        .context("Failed to open Windows console for agent login")
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn open_agent_login_terminal_impl(provider: &str) -> anyhow::Result<()> {
     let _ = agent_login_command(provider)?;
-    anyhow::bail!("Opening agent login in a terminal is currently supported on macOS only.")
+    anyhow::bail!(
+        "Opening agent login in a terminal is currently supported on macOS and Windows only."
+    )
 }
 
 #[cfg(target_os = "macos")]
@@ -1153,9 +1313,14 @@ fn reveal_file_in_finder(path: &std::path::Path) -> anyhow::Result<()> {
         .context("open command failed")
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn reveal_file_in_finder(path: &std::path::Path) -> anyhow::Result<()> {
+    crate::windows_shell::explorer_select(path)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn reveal_file_in_finder(_path: &std::path::Path) -> anyhow::Result<()> {
-    anyhow::bail!("Showing images in Finder is only supported on macOS")
+    anyhow::bail!("Showing images in Finder is only supported on macOS and Windows")
 }
 
 #[cfg(target_os = "macos")]
@@ -1167,9 +1332,14 @@ fn open_directory_in_finder(path: &std::path::Path) -> anyhow::Result<()> {
         .context("open command failed")
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn open_directory_in_finder(path: &std::path::Path) -> anyhow::Result<()> {
+    crate::windows_shell::explorer_open_dir(path)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn open_directory_in_finder(_path: &std::path::Path) -> anyhow::Result<()> {
-    anyhow::bail!("Opening Finder is only supported on macOS")
+    anyhow::bail!("Opening Finder is only supported on macOS and Windows")
 }
 
 #[cfg(target_os = "macos")]
@@ -1203,9 +1373,14 @@ fn copy_image_file_to_clipboard(path: &std::path::Path) -> anyhow::Result<()> {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(windows)]
+fn copy_image_file_to_clipboard(path: &std::path::Path) -> anyhow::Result<()> {
+    crate::windows_shell::copy_image_to_clipboard(path)
+}
+
+#[cfg(all(not(target_os = "macos"), not(windows)))]
 fn copy_image_file_to_clipboard(_path: &std::path::Path) -> anyhow::Result<()> {
-    anyhow::bail!("Copying images is only supported on macOS")
+    anyhow::bail!("Copying images is only supported on macOS and Windows")
 }
 
 #[cfg(target_os = "macos")]
@@ -1387,6 +1562,43 @@ pub async fn dev_reset_all_data(app: tauri::AppHandle) -> CmdResult<DevResetResu
         })
     })
     .await
+}
+
+#[cfg(all(test, windows))]
+mod windows_cli_tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn classify_cli_install_reports_managed_for_matching_copy() {
+        let tmp = tempdir().unwrap();
+        let bundled_cli = tmp.path().join("helmor-cli.exe");
+        let install_path = tmp.path().join("helmor.exe");
+        fs::write(&bundled_cli, b"cli-payload").unwrap();
+        fs::copy(&bundled_cli, &install_path).unwrap();
+
+        assert_eq!(
+            classify_cli_install(&install_path, &bundled_cli),
+            CliInstallState::Managed
+        );
+    }
+
+    #[test]
+    fn install_cli_copy_replaces_stale_file() {
+        let tmp = tempdir().unwrap();
+        let bundled_cli = tmp.path().join("helmor-cli.exe");
+        let install_path = tmp.path().join("helmor.exe");
+        fs::write(&bundled_cli, b"new-cli").unwrap();
+        fs::write(&install_path, b"old-cli").unwrap();
+
+        try_install_cli_copy_windows(&bundled_cli, &install_path).unwrap();
+
+        assert_eq!(
+            classify_cli_install(&install_path, &bundled_cli),
+            CliInstallState::Managed
+        );
+    }
 }
 
 // These tests use `std::os::unix::fs::symlink` and hard-coded

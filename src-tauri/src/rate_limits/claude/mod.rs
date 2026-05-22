@@ -1,5 +1,5 @@
-//! Claude OAuth rate-limit fetcher (macOS only — non-macOS targets
-//! short-circuit and never produce usage data).
+//! Claude OAuth rate-limit fetcher. macOS reads Keychain; Windows reads
+//! `%USERPROFILE%\.claude\.credentials.json`. Other targets may lack credentials.
 //!
 //! ```text
 //! fetch_claude_rate_limits   <- public entrypoint

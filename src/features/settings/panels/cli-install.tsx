@@ -2,6 +2,7 @@ import { Download, Loader2, Terminal } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { type CliStatus, getCliStatus, installCli } from "@/lib/api";
+import { isMac } from "@/lib/platform";
 import {
 	SettingsGroup,
 	SettingsNotice,
@@ -17,8 +18,11 @@ export function CliInstallPanel() {
 	const buildLabel = status?.buildMode === "development" ? "Debug" : "Release";
 	const isManaged = status?.installState === "managed";
 	const isStale = status?.installState === "stale";
+	const installTargetLabel = isMac()
+		? "/usr/local/bin"
+		: "%LOCALAPPDATA%\\Helmor\\bin";
 	const buttonLabel =
-		isManaged || isStale ? "Reinstall" : "Install to /usr/local/bin";
+		isManaged || isStale ? "Reinstall" : `Install to ${installTargetLabel}`;
 
 	useEffect(() => {
 		void getCliStatus().then(setStatus).catch(setError);
@@ -56,8 +60,16 @@ export function CliInstallPanel() {
 						<code className="rounded bg-muted px-1 py-0.5 text-mini">
 							{commandName}
 						</code>{" "}
-						command as a symlink to this app&apos;s bundled CLI so terminal
-						usage tracks desktop updates automatically. {buildLabel} build.
+						command {isMac() ? "as a symlink" : "as a copy"} to this app&apos;s
+						bundled CLI so terminal usage tracks desktop updates automatically.{" "}
+						{buildLabel} build.
+						{!isMac() ? (
+							<>
+								{" "}
+								On Windows the installer also appends the bin directory to your
+								user PATH when possible.
+							</>
+						) : null}
 						{isManaged ? (
 							<SettingsNotice tone="ok">
 								Installed at{" "}

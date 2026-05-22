@@ -56,7 +56,7 @@ vi.mock("./App.css", () => ({}));
 vi.mock("@tauri-apps/plugin-dialog", () => ({
 	open: vi.fn(),
 }));
-// Helmor is macOS-only; `./lib/platform` already returns `isMac: () => true`
+// Shortcut tests pin macOS rendering; platform detection is covered in platform.test.ts
 // unconditionally. No mock needed, but keep this vi.mock stub to document the
 // shortcut suite's dependency on that assumption.
 vi.mock("./lib/platform", () => ({
