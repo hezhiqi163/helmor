@@ -187,8 +187,35 @@ fn resolve_data_dir() -> Result<PathBuf> {
     Ok(home.join(default_data_dir_name()))
 }
 
+#[cfg(unix)]
 fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from)
+}
+
+// Windows port (windows-port branch): Windows does not set $HOME by
+// default; user shells (Cygwin / Git Bash / WSL-on-Windows) sometimes do,
+// so honour $HOME when present and otherwise fall back to USERPROFILE,
+// then HOMEDRIVE+HOMEPATH. This keeps the macOS / Linux path above
+// byte-for-byte identical.
+#[cfg(windows)]
+fn dirs_home() -> Option<PathBuf> {
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(PathBuf::from(home));
+    }
+    if let Some(profile) = std::env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(profile));
+    }
+    match (
+        std::env::var_os("HOMEDRIVE"),
+        std::env::var_os("HOMEPATH"),
+    ) {
+        (Some(drive), Some(path)) => {
+            let mut p = PathBuf::from(drive);
+            p.push(path);
+            Some(p)
+        }
+        _ => None,
+    }
 }
 
 /// Ensure all required subdirectories exist.

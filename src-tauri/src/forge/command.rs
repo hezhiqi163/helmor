@@ -170,6 +170,7 @@ pub(crate) fn command_detail(output: &CommandOutput) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]

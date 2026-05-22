@@ -588,6 +588,7 @@ fn init_create_git_repo(repo_root: &Path) {
     git_ops::run_git(["-C", root, "fetch", "origin"], None).unwrap();
 }
 
+#[cfg(unix)]
 fn make_executable_if_script(path: &Path) {
     use std::os::unix::fs::PermissionsExt;
 
@@ -598,6 +599,11 @@ fn make_executable_if_script(path: &Path) {
         fs::set_permissions(path, permissions).unwrap();
     }
 }
+
+// Windows has no concept of an executable bit; shell scripts are run
+// via their interpreter (e.g. `bash script.sh`) rather than direct exec.
+#[cfg(windows)]
+fn make_executable_if_script(_path: &Path) {}
 
 fn init_git_repo(repo_root: &Path) {
     git_ops::run_git(["init", "-b", "main", repo_root.to_str().unwrap()], None).unwrap();

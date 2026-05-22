@@ -1,7 +1,9 @@
 //! Process resource-limit tuning for the desktop host.
 
+#[cfg(unix)]
 const TARGET_NOFILE_SOFT_LIMIT: u64 = 4096;
 
+#[cfg(unix)]
 pub fn raise_nofile_soft_limit() {
     let mut current = libc::rlimit {
         rlim_cur: 0,
@@ -24,11 +26,18 @@ pub fn raise_nofile_soft_limit() {
     let _ = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &updated) };
 }
 
+// Windows has no getrlimit/setrlimit. The default per-process handle ceiling
+// (~16M kernel handles, ~10k stdio FDs) is already well above what helmor
+// needs, so callers get a no-op here and stay platform-agnostic.
+#[cfg(windows)]
+pub fn raise_nofile_soft_limit() {}
+
+#[cfg(unix)]
 fn desired_nofile_soft_limit(current_soft: u64, hard: u64) -> u64 {
     current_soft.max(TARGET_NOFILE_SOFT_LIMIT.min(hard))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 

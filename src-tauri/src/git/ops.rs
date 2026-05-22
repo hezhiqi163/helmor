@@ -171,8 +171,11 @@ where
     );
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
-    use std::os::unix::process::CommandExt;
-    command.process_group(0);
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
 
     let child = command.spawn().context("Failed to spawn git")?;
     let child_pid = child.id();
@@ -211,8 +214,23 @@ where
             // SAFETY: `child_pid` == PGID (we set process_group(0) at
             // spawn). Negative PID targets the whole group. If the group
             // has already exited, `libc::kill` returns ESRCH harmlessly.
+            #[cfg(unix)]
             unsafe {
                 libc::kill(-(child_pid as libc::pid_t), libc::SIGKILL);
+            }
+            // Windows port (windows-port branch): no Unix process groups;
+            // `taskkill /F /T /PID` walks the child PID tree and kills git
+            // plus its descendants (ssh.exe, git-remote-https.exe …). It is a
+            // built-in Windows utility — no extra dependency.
+            #[cfg(windows)]
+            {
+                let _ = std::process::Command::new("taskkill")
+                    .args(["/F", "/T", "/PID"])
+                    .arg(child_pid.to_string())
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .status();
             }
             let _ = waiter.join();
             bail!(

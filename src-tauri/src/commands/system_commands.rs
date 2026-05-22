@@ -1387,7 +1387,11 @@ pub async fn dev_reset_all_data(app: tauri::AppHandle) -> CmdResult<DevResetResu
     .await
 }
 
-#[cfg(test)]
+// These tests use `std::os::unix::fs::symlink` and hard-coded
+// `/Applications/Helmor.app/...` paths. They compile on macOS / Linux
+// (unix family) unchanged; they cannot compile on Windows because
+// `std::os::unix` is missing — gate Windows out only.
+#[cfg(all(test, not(target_os = "windows")))]
 mod tests {
     use super::*;
     use std::fs;

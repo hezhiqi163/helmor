@@ -399,6 +399,7 @@ pub fn copy_dir_all(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(unix)]
 pub fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
     use std::os::unix::fs::symlink;
 
@@ -414,6 +415,54 @@ pub fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
     let link_target = fs::read_link(source)
         .with_context(|| format!("Failed to read symlink {}", source.display()))?;
     symlink(&link_target, destination).with_context(|| {
+        format!(
+            "Failed to copy symlink {} to {}",
+            source.display(),
+            destination.display()
+        )
+    })
+}
+
+// Windows port (windows-port branch): Windows distinguishes file vs dir
+// symlinks at creation time and `std::os::unix::fs::symlink` does not exist.
+// This whole function is gated to `cfg(windows)`, so the macOS / Unix
+// implementation above is unaffected.
+#[cfg(windows)]
+pub fn copy_symlink(source: &Path, destination: &Path) -> Result<()> {
+    use std::os::windows::fs::{symlink_dir, symlink_file};
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create parent directory for symlink {}",
+                destination.display()
+            )
+        })?;
+    }
+
+    let link_target = fs::read_link(source)
+        .with_context(|| format!("Failed to read symlink {}", source.display()))?;
+
+    // Resolve target relative to the symlink's parent directory so we can
+    // probe whether it points to a file or directory.
+    let resolved_target = if link_target.is_absolute() {
+        link_target.clone()
+    } else {
+        source
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(&link_target)
+    };
+    let target_is_dir = fs::metadata(&resolved_target)
+        .map(|m| m.is_dir())
+        .unwrap_or(false);
+
+    let result = if target_is_dir {
+        symlink_dir(&link_target, destination)
+    } else {
+        symlink_file(&link_target, destination)
+    };
+    result.with_context(|| {
         format!(
             "Failed to copy symlink {} to {}",
             source.display(),

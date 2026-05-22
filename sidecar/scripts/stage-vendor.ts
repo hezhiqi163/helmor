@@ -511,6 +511,23 @@ function stageCodexBinary(target: TargetInfo): void {
 // Main
 // ---------------------------------------------------------------------------
 
+// Windows host: no-op staging — see windows-port branch Phase 2 for the
+// real claude-code / codex / gh / glab Windows staging. The directory
+// still has to exist so downstream `bun build --compile` + Tauri's
+// externalBin / resources resolution can find `dist/vendor/`. On any other
+// platform (macOS) this block is skipped and the original code below runs
+// unchanged.
+if (process.platform === "win32") {
+	rmSync(DIST_VENDOR, { recursive: true, force: true });
+	mkdirSync(DIST_VENDOR, { recursive: true });
+	console.warn(
+		"[stage-vendor] Windows host: vendor staging is a no-op in Phase 1 " +
+			"(claude-code / codex / gh / glab will be staged in Phase 2)",
+	);
+	console.log(`[stage-vendor] ✓ created empty → ${DIST_VENDOR}`);
+	process.exit(0);
+}
+
 const target = detectTarget();
 
 console.log(

@@ -8,6 +8,11 @@
 //! spawns a one-shot login shell, captures its `env` output, and merges
 //! the interesting variables into the current process so every child
 //! (sidecar, git, workspace scripts) inherits them automatically.
+//!
+//! Windows GUI apps already inherit the full user environment (PATH plus
+//! everything else) from the Registry (`HKCU\Environment` /
+//! `HKLM\...\Session Manager\Environment`) on process launch, so the
+//! Windows path is a no-op.
 
 /// Merge the user's login-shell environment into the current process.
 ///
@@ -15,9 +20,28 @@
 /// spawned. It is intentionally infallible — on failure it logs and
 /// returns, leaving the existing (minimal) environment in place.
 pub fn inherit_login_shell_env() {
+    #[cfg(unix)]
     unix::inherit();
+    #[cfg(windows)]
+    windows::inherit();
 }
 
+#[cfg(windows)]
+mod windows {
+    /// Windows GUI processes already inherit the full user environment from
+    /// the Registry, so there's nothing analogous to the macOS login-shell
+    /// capture to do. Codex provider `env_key`s likewise resolve via
+    /// `std::env::var` whenever the user has set them in System Properties
+    /// or the shell that launched Helmor.
+    pub fn inherit() {
+        tracing::info!(
+            "Windows host: skipping login-shell env capture \
+             (GUI process already inherits user environment)"
+        );
+    }
+}
+
+#[cfg(unix)]
 mod unix {
     use std::collections::HashMap;
     use std::process::Command;

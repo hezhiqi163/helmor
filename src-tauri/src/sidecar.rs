@@ -162,8 +162,14 @@ impl SidecarProcess {
         // Put the sidecar in its own process group so SIGTERM/SIGKILL
         // reaches all child processes (Claude CLI, Codex CLI) instead
         // of only hitting the Bun parent.
-        use std::os::unix::process::CommandExt;
-        cmd.process_group(0);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            cmd.process_group(0);
+        }
+        // Windows port (windows-port branch): no spawn-time process-group
+        // analog; `kill` / `send_sigterm` below use `taskkill /T` to walk
+        // the spawned process tree instead.
 
         // Pass log config to the sidecar process
         if let Ok(dir) = crate::data_dir::logs_dir() {
@@ -272,9 +278,27 @@ impl SidecarProcess {
     /// `ManagedSidecar::shutdown`. Kill the whole process group first so
     /// child CLIs don't get reparented to launchd as orphans.
     fn kill(&mut self) {
+        #[cfg(unix)]
         unsafe {
             libc::kill(-(self.pid() as libc::pid_t), libc::SIGKILL);
         }
+
+        // Windows has no Unix-style process group; `taskkill /F /T` walks
+        // the spawned tree by PID and force-terminates Bun plus its
+        // children (claude.exe / codex.exe). It's a built-in tool so
+        // there's no extra dependency.
+        #[cfg(windows)]
+        {
+            let pid = self.pid();
+            let _ = std::process::Command::new("taskkill")
+                .args(["/F", "/T", "/PID"])
+                .arg(pid.to_string())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
+        }
+
         let _ = self.child.kill();
         let _ = self.child.wait();
     }
@@ -303,8 +327,28 @@ impl SidecarProcess {
     fn send_sigterm(&self) {
         // SAFETY: `pid()` is the live child's PID (== PGID since we set
         // process_group(0) at spawn). Negative PID targets the whole group.
+        #[cfg(unix)]
         unsafe {
             libc::kill(-(self.pid() as libc::pid_t), libc::SIGTERM);
+        }
+
+        // Windows has no SIGTERM equivalent for non-console GUI parents.
+        // `taskkill /T` (without /F) walks the spawned tree and sends
+        // WM_CLOSE to windowed children and a polite signal to console
+        // children that explicitly handle it. Bun's CLI does not handle
+        // it, so the cooperative-wait + SIGKILL fallback in
+        // `ManagedSidecar::shutdown` (and `kill()` above) takes care of
+        // the strict tear-down.
+        #[cfg(windows)]
+        {
+            let pid = self.pid();
+            let _ = std::process::Command::new("taskkill")
+                .args(["/T", "/PID"])
+                .arg(pid.to_string())
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status();
         }
     }
 }

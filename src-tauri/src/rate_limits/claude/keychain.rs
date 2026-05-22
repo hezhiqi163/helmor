@@ -63,7 +63,46 @@ fn load_keychain_credentials() -> Result<Vec<ClaudeOAuthCredentials>> {
     Ok(credentials)
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+fn load_keychain_credentials() -> Result<Vec<ClaudeOAuthCredentials>> {
+    // Unlike macOS (where Claude Code uses the Keychain via /usr/bin/security),
+    // on Windows the CLI stores OAuth credentials in a plaintext JSON file at
+    // `%USERPROFILE%\.claude\.credentials.json`. Read it and reuse the same
+    // parse path as the macOS keychain payload — the on-disk shape is the
+    // same JSON the keychain entry holds.
+    let Some(home) = std::env::var_os("USERPROFILE") else {
+        tracing::debug!("USERPROFILE not set; skipping Claude credentials read");
+        return Ok(Vec::new());
+    };
+    let path = std::path::Path::new(&home)
+        .join(".claude")
+        .join(".credentials.json");
+
+    let data = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            tracing::debug!(
+                "{} not found; user likely hasn't run `claude login`",
+                path.display()
+            );
+            return Ok(Vec::new());
+        }
+        Err(err) => {
+            tracing::warn!(
+                "Failed to read Claude credentials at {}: {err}",
+                path.display()
+            );
+            return Ok(Vec::new());
+        }
+    };
+
+    Ok(parse_credentials(&data).into_iter().collect())
+}
+
+// Linux (and other Unix-like hosts) — Claude Code's credentials handling
+// there isn't part of the Phase 2 Windows port; keep the noop until a
+// proper Linux port lands.
+#[cfg(all(not(target_os = "macos"), not(target_os = "windows")))]
 fn load_keychain_credentials() -> Result<Vec<ClaudeOAuthCredentials>> {
     Ok(Vec::new())
 }
