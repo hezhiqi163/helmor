@@ -70,10 +70,25 @@ fn resolve_from_running_exe() -> BundledForgeCliPaths {
     }
 }
 
-fn resolve_for_exe(exe: &Path) -> Option<BundledForgeCliPaths> {
+fn bundled_resources_dir_for_exe(exe: &Path) -> Option<PathBuf> {
     let exe_dir = exe.parent()?;
-    let contents_dir = exe_dir.parent()?;
-    let resources_dir = contents_dir.join("Resources");
+    #[cfg(target_os = "macos")]
+    {
+        let contents_dir = exe_dir.parent()?;
+        Some(contents_dir.join("Resources"))
+    }
+    #[cfg(windows)]
+    {
+        Some(exe_dir.to_path_buf())
+    }
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
+    {
+        None
+    }
+}
+
+fn resolve_for_exe(exe: &Path) -> Option<BundledForgeCliPaths> {
+    let resources_dir = bundled_resources_dir_for_exe(exe)?;
 
     let gh_name = if cfg!(windows) { "gh.exe" } else { "gh" };
     let glab_name = if cfg!(windows) { "glab.exe" } else { "glab" };
@@ -124,6 +139,7 @@ fn resolve_for_dev_workspace(workspace_root: &Path) -> BundledForgeCliPaths {
 mod tests {
     use super::*;
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn resolve_finds_binaries_under_resources_vendor() {
         let root = tempfile::tempdir().unwrap();
@@ -148,6 +164,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn resolve_returns_none_when_binaries_missing() {
         let root = tempfile::tempdir().unwrap();
@@ -173,7 +190,7 @@ mod tests {
         assert_eq!(paths.glab.unwrap(), vendor.join("glab/glab"));
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(all(debug_assertions, target_os = "macos"))]
     #[test]
     fn app_bundle_paths_win_over_debug_vendor() {
         let root = tempfile::tempdir().unwrap();

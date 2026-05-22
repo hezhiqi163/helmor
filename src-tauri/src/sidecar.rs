@@ -108,10 +108,28 @@ pub fn load_cursor_api_key() -> Option<String> {
     (!key.is_empty()).then(|| key.to_string())
 }
 
-fn resolve_bundled_agent_paths_for_exe(exe: &std::path::Path) -> Option<BundledAgentPaths> {
+/// Tauri `resource_dir` layout differs by OS (see tauri_utils::platform::resource_dir).
+/// macOS: `${exe_dir}/../Resources` inside `.app`.
+/// Windows: same directory as the main executable.
+fn bundled_resources_dir_for_exe(exe: &std::path::Path) -> Option<std::path::PathBuf> {
     let exe_dir = exe.parent()?;
-    let contents_dir = exe_dir.parent()?;
-    let resources_dir = contents_dir.join("Resources");
+    #[cfg(target_os = "macos")]
+    {
+        let contents_dir = exe_dir.parent()?;
+        Some(contents_dir.join("Resources"))
+    }
+    #[cfg(windows)]
+    {
+        Some(exe_dir.to_path_buf())
+    }
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
+    {
+        None
+    }
+}
+
+fn resolve_bundled_agent_paths_for_exe(exe: &std::path::Path) -> Option<BundledAgentPaths> {
+    let resources_dir = bundled_resources_dir_for_exe(exe)?;
     let claude_bin_name = if cfg!(windows) {
         "claude.exe"
     } else {
@@ -913,6 +931,7 @@ mod tests {
             .is_err());
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn bundled_agent_paths_resolve_from_running_app() {
         let root = tempfile::tempdir().unwrap();

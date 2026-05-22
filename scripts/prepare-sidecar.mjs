@@ -94,11 +94,16 @@ function main() {
 	run("bun run build", sidecarDir);
 
 	const triple = detectTargetTriple();
-	const sidecarSource = resolve(sidecarDir, "dist", "helmor-sidecar");
+	// On Windows, `bun build --compile` and `cargo build` produce `.exe`-
+	// suffixed binaries, and Tauri's `externalBin` resolves to `<base>-<triple>.exe`.
+	// On macOS/Linux `exeSuffix` is `""` so all template paths below evaluate
+	// to byte-for-byte equivalent strings as upstream.
+	const exeSuffix = process.platform === "win32" ? ".exe" : "";
+	const sidecarSource = resolve(sidecarDir, "dist", `helmor-sidecar${exeSuffix}`);
 	const sidecarDestination = resolve(
 		sidecarDir,
 		"dist",
-		`helmor-sidecar-${triple}`,
+		`helmor-sidecar-${triple}${exeSuffix}`,
 	);
 	const cliBinaryName =
 		process.platform === "win32" ? "helmor-cli.exe" : "helmor-cli";
@@ -109,7 +114,7 @@ function main() {
 		"release",
 		cliBinaryName,
 	);
-	const cliDestination = resolve(bundledBinDir, `helmor-cli-${triple}`);
+	const cliDestination = resolve(bundledBinDir, `helmor-cli-${triple}${exeSuffix}`);
 
 	if (!existsSync(sidecarSource)) {
 		throw new Error(
